@@ -7,7 +7,7 @@ import { apiRequest } from '@/lib/api-client';
 import { HealthStatus } from '@/lib/types';
 
 export default function HomePage() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loadingHealth, setLoadingHealth] = useState(true);
 
@@ -94,42 +94,108 @@ export default function HomePage() {
 
         {/* CTA Buttons */}
         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
-          {isAuthenticated ? (
+          <Link
+            href="/dashboard"
+            className="btn-primary"
+            style={{ fontSize: '1.05rem', padding: '14px 32px', background: 'linear-gradient(135deg, #10b981 0%, #06b6d4 100%)' }}
+          >
+            📊 View August 2026 Finance Report →
+          </Link>
+
+          {!isAuthenticated && (
             <Link
-              href="/dashboard"
-              className="btn-primary"
-              style={{ fontSize: '1.05rem', padding: '14px 32px' }}
+              href="/login"
+              className="btn-secondary"
+              style={{ fontSize: '1.05rem', padding: '14px 28px' }}
             >
-              Go to Dashboard →
+              Sign In to Platform
             </Link>
-          ) : (
-            <>
-              <Link
-                href="/login"
-                className="btn-primary"
-                style={{ fontSize: '1.05rem', padding: '14px 32px' }}
-              >
-                Sign In to Platform →
-              </Link>
-              <Link
-                href="/register"
-                className="btn-secondary"
-                style={{ fontSize: '1.05rem', padding: '14px 28px' }}
-              >
-                Create Account
-              </Link>
-            </>
           )}
 
           <a
-            href="http://localhost:8080/api-doc"
+            href="https://drive.google.com/drive/folders/1eUTQMU0rfQftTwfREf9-FzVcfNFLHyGM?usp=drive_link"
             target="_blank"
             rel="noreferrer"
             className="btn-secondary"
-            style={{ fontSize: '1.05rem', padding: '14px 24px' }}
+            style={{ fontSize: '1.05rem', padding: '14px 24px', borderColor: 'rgba(6, 182, 212, 0.3)', color: '#38bdf8' }}
           >
-            Swagger API Docs ↗
+            Drive Receipts Vault ↗
           </a>
+        </div>
+      </section>
+
+      {/* August 2026 Financial Highlights Spotlight */}
+      <section style={{ marginBottom: '60px' }}>
+        <div
+          className="glass-panel-glow"
+          style={{
+            padding: '32px 36px',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.8) 0%, rgba(6, 182, 212, 0.05) 100%)',
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <span className="badge badge-success">Official Audit</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>August 1 – August 31, 2026</span>
+              </div>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 800 }}>
+                Zentura Finance — August 2026 Performance Spotlight
+              </h2>
+            </div>
+            <Link href="/dashboard" className="btn-primary" style={{ padding: '8px 20px', fontSize: '0.9rem' }}>
+              Open Full Interactive Dashboard →
+            </Link>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '16px',
+            }}
+          >
+            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase' }}>1. Total Income</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#34d399', marginTop: '4px' }}>
+                6,19,987.50 BDT
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                Gavin GBP, Fiverr USD, Retained Fund
+              </div>
+            </div>
+
+            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase' }}>2. Total Expenses</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#fb7185', marginTop: '4px' }}>
+                (4,53,822.10) BDT
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                Macbook 2-units, Profits, Ops
+              </div>
+            </div>
+
+            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', textTransform: 'uppercase' }}>3. Net Operating Balance</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#38bdf8', marginTop: '4px' }}>
+                1,66,165.40 BDT
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                Operating Cash Flow Surplus
+              </div>
+            </div>
+
+            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.25)' }}>
+              <div style={{ fontSize: '0.75rem', color: '#c084fc', textTransform: 'uppercase' }}>6. Net Remaining Fund</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f3e8ff', marginTop: '4px' }}>
+                1,71,165.40 BDT
+              </div>
+              <div style={{ fontSize: '0.78rem', color: '#e9d5ff', marginTop: '2px' }}>
+                Audited Closing Reserve
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
