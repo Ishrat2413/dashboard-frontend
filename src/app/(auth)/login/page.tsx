@@ -10,7 +10,7 @@ import { DevAccountSwitcher } from '@/components/auth/DevAccountSwitcher';
 function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login } = useAuth();
+  const { login, lockoutRemainingSeconds } = useAuth();
   const toast = useToast();
 
   const [email, setEmail] = useState('');
@@ -32,9 +32,12 @@ function LoginFormContent() {
       setPassword('12345678');
     }
 
-    if (searchParams.get('expired') === '1') {
+    if (searchParams.get('reason') === 'inactivity') {
+      toast.warning('Session locked due to 15 minutes of inactivity for your security.');
+    } else if (searchParams.get('expired') === '1') {
       toast.warning('Session expired. Please log in again.');
     }
+
     if (searchParams.get('verified') === '1') {
       toast.success('Account verified successfully! You can now log in.');
     }
@@ -47,20 +50,26 @@ function LoginFormContent() {
       return;
     }
 
+    if (lockoutRemainingSeconds > 0) {
+      setErrorMsg(`Anti-brute-force lockout active. Please wait ${lockoutRemainingSeconds}s.`);
+      return;
+    }
+
     setLoading(true);
     setErrorMsg(null);
 
     try {
       await login(email, password);
-      toast.success('Logged in successfully!');
+      toast.success('Authenticated successfully!');
       router.push('/dashboard');
-    } catch (err: any) {
-      const msg = err.message || 'Login failed. Please verify your credentials.';
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Login failed. Please verify your credentials.';
       setErrorMsg(msg);
       toast.error(msg);
 
       // Check if account not verified
-      if (err.statusCode === 403 && msg.toLowerCase().includes('verif')) {
+      const statusCode = (err as { statusCode?: number })?.statusCode;
+      if (statusCode === 403 && msg.toLowerCase().includes('verif')) {
         setTimeout(() => {
           router.push(`/verify-account?email=${encodeURIComponent(email)}`);
         }, 1500);
@@ -92,6 +101,29 @@ function LoginFormContent() {
             Sign in to access your Zentura financial portfolio
           </p>
         </div>
+
+        {/* Lockout Warning Banner */}
+        {lockoutRemainingSeconds > 0 && (
+          <div
+            style={{
+              background: 'rgba(245, 158, 11, 0.15)',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '12px 14px',
+              color: '#fbbf24',
+              fontSize: '0.85rem',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <span>🛡️</span>
+            <span>
+              Brute-force protection: Locked for <strong>{lockoutRemainingSeconds}s</strong>
+            </span>
+          </div>
+        )}
 
         {errorMsg && (
           <div
@@ -175,10 +207,16 @@ function LoginFormContent() {
           <button
             type="submit"
             className="btn-primary"
-            disabled={loading}
+            disabled={loading || lockoutRemainingSeconds > 0}
             style={{ width: '100%', marginTop: '6px', height: '46px' }}
           >
-            {loading ? <span className="animate-spin">⟳</span> : 'Sign In'}
+            {loading ? (
+              <span className="animate-spin">⟳</span>
+            ) : lockoutRemainingSeconds > 0 ? (
+              `Locked (${lockoutRemainingSeconds}s)`
+            ) : (
+              'Sign In'
+            )}
           </button>
         </form>
 

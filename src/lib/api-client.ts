@@ -8,9 +8,14 @@ const HEALTH_BASE_URL =
 export class ApiError extends Error {
   statusCode: number;
   errors?: { field: string; message: string }[];
-  rawResponse?: any;
+  rawResponse?: unknown;
 
-  constructor(message: string, statusCode: number, errors?: { field: string; message: string }[], raw?: any) {
+  constructor(
+    message: string,
+    statusCode: number,
+    errors?: { field: string; message: string }[],
+    raw?: unknown
+  ) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
@@ -19,32 +24,31 @@ export class ApiError extends Error {
   }
 }
 
-// Token storage helpers
+// Memory & Session Cache Keys
 export const TOKEN_STORAGE_KEY = 'zentura_access_token';
-export const REFRESH_STORAGE_KEY = 'zentura_refresh_token';
 export const USER_STORAGE_KEY = 'zentura_user';
 
+let inMemoryAccessToken: string | null = null;
+
 export function getStoredAccessToken(): string | null {
+  if (inMemoryAccessToken) return inMemoryAccessToken;
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem(TOKEN_STORAGE_KEY);
+  const stored = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  if (stored) inMemoryAccessToken = stored;
+  return stored;
 }
 
-export function getStoredRefreshToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(REFRESH_STORAGE_KEY);
-}
-
-export function setStoredTokens(accessToken: string, refreshToken: string) {
+export function setStoredAccessToken(accessToken: string) {
+  inMemoryAccessToken = accessToken;
   if (typeof window === 'undefined') return;
-  localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
-  localStorage.setItem(REFRESH_STORAGE_KEY, refreshToken);
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
 }
 
 export function clearStoredAuth() {
+  inMemoryAccessToken = null;
   if (typeof window === 'undefined') return;
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
-  localStorage.removeItem(REFRESH_STORAGE_KEY);
-  localStorage.removeItem(USER_STORAGE_KEY);
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  sessionStorage.removeItem(USER_STORAGE_KEY);
 }
 
 let isRefreshing = false;
@@ -60,7 +64,7 @@ function onRefreshed(token: string) {
 }
 
 /**
- * Universal fetch wrapper for the NestJS backend
+ * Universal fetch wrapper for the NestJS backend & Next.js BFF routes
  */
 export async function apiRequest<T = any>(
   endpoint: string,
@@ -68,14 +72,24 @@ export async function apiRequest<T = any>(
   retry = true
 ): Promise<ServiceResponse<T>> {
   const isHealth = endpoint === '/health' || endpoint === '/metrics';
-  const url = isHealth
-    ? `${HEALTH_BASE_URL}${endpoint}`
-    : `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const isNextAuthRoute = endpoint.startsWith('/api/auth/');
+
+  let url: string;
+  if (isNextAuthRoute) {
+    url = endpoint;
+  } else if (isHealth) {
+    url = `${HEALTH_BASE_URL}${endpoint}`;
+  } else {
+    url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  }
 
   const headers = new Headers(options.headers || {});
-  
+
+  // Security Headers
+  headers.set('X-Requested-With', 'XMLHttpRequest');
+
   const token = getStoredAccessToken();
-  if (token && !headers.has('Authorization')) {
+  if (token && !headers.has('Authorization') && !isNextAuthRoute) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
@@ -90,46 +104,52 @@ export async function apiRequest<T = any>(
     headers,
   });
 
-  // Handle 401 and token refresh
-  if (response.status === 401 && retry && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh-token')) {
-    const refreshToken = getStoredRefreshToken();
-    if (refreshToken) {
-      if (!isRefreshing) {
-        isRefreshing = true;
-        try {
-          const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh-token`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-          });
-
-          if (refreshRes.ok) {
-            const data: ServiceResponse<LoginResponseData> = await refreshRes.json();
-            if (data.data?.access_token && data.data?.refresh_token) {
-              setStoredTokens(data.data.access_token, data.data.refresh_token);
-              isRefreshing = false;
-              onRefreshed(data.data.access_token);
-              // Retry original request
-              return apiRequest<T>(endpoint, options, false);
-            }
-          }
-        } catch {
-          // Refresh failed
-        }
-
-        isRefreshing = false;
-        clearStoredAuth();
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-          window.location.href = '/login?expired=1';
-        }
-      } else {
-        // Wait for active refresh
-        return new Promise((resolve) => {
-          subscribeTokenRefresh(() => {
-            resolve(apiRequest<T>(endpoint, options, false));
-          });
+  // Handle 401 and silent token refresh via HttpOnly cookie
+  if (
+    response.status === 401 &&
+    retry &&
+    !endpoint.includes('/auth/login') &&
+    !endpoint.includes('/api/auth/login') &&
+    !endpoint.includes('/api/auth/refresh')
+  ) {
+    if (!isRefreshing) {
+      isRefreshing = true;
+      try {
+        const refreshRes = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
         });
+
+        if (refreshRes.ok) {
+          const data: ServiceResponse<LoginResponseData> = await refreshRes.json();
+          if (data.data?.access_token) {
+            setStoredAccessToken(data.data.access_token);
+            isRefreshing = false;
+            onRefreshed(data.data.access_token);
+            // Retry original request with fresh token
+            return apiRequest<T>(endpoint, options, false);
+          }
+        }
+      } catch {
+        // Refresh failed
       }
+
+      isRefreshing = false;
+      clearStoredAuth();
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        // eslint-disable-next-line @next/next/no-assign-module-variable, @next/next/no-html-link-for-pages
+        window.location.assign('/login?expired=1');
+      }
+    } else {
+      // Wait for ongoing refresh
+      return new Promise((resolve) => {
+        subscribeTokenRefresh(() => {
+          resolve(apiRequest<T>(endpoint, options, false));
+        });
+      });
     }
   }
 

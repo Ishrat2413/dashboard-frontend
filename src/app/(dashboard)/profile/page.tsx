@@ -6,9 +6,10 @@ import { useToast } from '@/context/ToastContext';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { apiRequest } from '@/lib/api-client';
 import { OtpInput } from '@/components/auth/OtpInput';
+import { PasswordStrengthMeter, evaluatePassword } from '@/components/auth/PasswordStrengthMeter';
 
 export default function ProfilePage() {
-  const { user, refreshProfile, logout, logoutAll } = useAuth();
+  const { user, refreshProfile, changePassword, logout, logoutAll } = useAuth();
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -21,7 +22,7 @@ export default function ProfilePage() {
   const [removingAvatar, setRemovingAvatar] = useState(false);
 
   // Password Change State
-  const [currentPassword, setCurrentPassword] = useState('');
+  const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
@@ -45,12 +46,13 @@ export default function ProfilePage() {
     try {
       await apiRequest('/profile/me', {
         method: 'PATCH',
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name: name.trim() }),
       });
       await refreshProfile();
       toast.success('Display name updated successfully.');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to update name.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update name.';
+      toast.error(msg);
     } finally {
       setSavingName(false);
     }
@@ -77,8 +79,9 @@ export default function ProfilePage() {
       });
       await refreshProfile();
       toast.success('Avatar uploaded successfully!');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to upload avatar.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to upload avatar.';
+      toast.error(msg);
     } finally {
       setUploadingAvatar(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -96,8 +99,9 @@ export default function ProfilePage() {
       });
       await refreshProfile();
       toast.success('Avatar removed.');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to remove avatar.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to remove avatar.';
+      toast.error(msg);
     } finally {
       setRemovingAvatar(false);
     }
@@ -106,10 +110,16 @@ export default function ProfilePage() {
   // Handle Password Change
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 8) {
-      toast.error('New password must be at least 8 characters.');
+    if (!oldPassword || !newPassword) return;
+
+    const { isValid } = evaluatePassword(newPassword);
+    if (!isValid) {
+      toast.error(
+        'New password must contain at least 8 characters, with upper & lowercase letters, numbers, and special symbols.'
+      );
       return;
     }
+
     if (newPassword !== confirmPassword) {
       toast.error('New passwords do not match.');
       return;
@@ -117,19 +127,14 @@ export default function ProfilePage() {
 
     setSavingPassword(true);
     try {
-      await apiRequest('/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-        }),
-      });
+      await changePassword(oldPassword, newPassword);
       toast.success('Password updated successfully.');
-      setCurrentPassword('');
+      setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to change password.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to change password.';
+      toast.error(msg);
     } finally {
       setSavingPassword(false);
     }
@@ -145,14 +150,15 @@ export default function ProfilePage() {
       await apiRequest('/auth/change-email/initiate', {
         method: 'POST',
         body: JSON.stringify({
-          newEmail,
+          newEmail: newEmail.trim().toLowerCase(),
           password: emailAuthPassword,
         }),
       });
       toast.success(`Verification code sent to ${newEmail}`);
       setEmailStep(2);
-    } catch (err: any) {
-      toast.error(err.message || 'Could not initiate email change.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not initiate email change.';
+      toast.error(msg);
     } finally {
       setChangingEmail(false);
     }
@@ -168,7 +174,7 @@ export default function ProfilePage() {
       await apiRequest('/auth/change-email/verify', {
         method: 'POST',
         body: JSON.stringify({
-          otp: emailOtp,
+          otp: emailOtp.trim(),
         }),
       });
       await refreshProfile();
@@ -177,8 +183,9 @@ export default function ProfilePage() {
       setNewEmail('');
       setEmailAuthPassword('');
       setEmailOtp('');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to verify email OTP.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to verify email OTP.';
+      toast.error(msg);
     } finally {
       setChangingEmail(false);
     }
@@ -389,25 +396,25 @@ export default function ProfilePage() {
                 Requires your existing password to verify ownership before applying changes.
               </p>
 
-              <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '18px', maxWidth: '440px' }}>
+              <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '18px', maxWidth: '460px' }}>
                 <div>
-                  <label className="input-label" htmlFor="current-pass">
+                  <label className="input-label" htmlFor="old-pass">
                     Current Password
                   </label>
                   <input
-                    id="current-pass"
+                    id="old-pass"
                     type="password"
                     className="input-field"
                     placeholder="••••••••"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
                     required
                   />
                 </div>
 
                 <div>
                   <label className="input-label" htmlFor="new-pass">
-                    New Password (min 8 chars)
+                    New Password (Complexity Enforced)
                   </label>
                   <input
                     id="new-pass"
@@ -418,7 +425,9 @@ export default function ProfilePage() {
                     onChange={(e) => setNewPassword(e.target.value)}
                     required
                     minLength={8}
+                    maxLength={128}
                   />
+                  <PasswordStrengthMeter password={newPassword} />
                 </div>
 
                 <div>
@@ -434,13 +443,14 @@ export default function ProfilePage() {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
                     minLength={8}
+                    maxLength={128}
                   />
                 </div>
 
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={savingPassword || !currentPassword || !newPassword}
+                  disabled={savingPassword || !oldPassword || !evaluatePassword(newPassword).isValid}
                   style={{ alignSelf: 'flex-start', padding: '10px 24px', fontSize: '0.9rem' }}
                 >
                   {savingPassword ? <span className="animate-spin">⟳</span> : 'Update Password'}

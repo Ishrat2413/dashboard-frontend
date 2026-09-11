@@ -5,27 +5,38 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import { PasswordStrengthMeter, evaluatePassword } from '@/components/auth/PasswordStrengthMeter';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { register } = useAuth();
   const toast = useToast();
 
-  const [name, setName] = useState('');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'CUSTOMER' | 'SHOP_OWNER' | 'ADMIN'>('CUSTOMER');
+  const [showPassword, setShowPassword] = useState(false);
+  const [role, setRole] = useState<'CUSTOMER' | 'SHOP_OWNER'>('CUSTOMER');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !password) {
-      setErrorMsg('Please fill in all fields.');
+    if (!fullName.trim() || !email.trim() || !password) {
+      setErrorMsg('Please fill in all required fields.');
       return;
     }
-    if (password.length < 8) {
-      setErrorMsg('Password must be at least 8 characters long.');
+
+    if (fullName.trim().length < 2) {
+      setErrorMsg('Full name must be at least 2 characters long.');
+      return;
+    }
+
+    const { isValid } = evaluatePassword(password);
+    if (!isValid) {
+      setErrorMsg(
+        'Password must contain at least 8 characters, with at least one uppercase letter, one lowercase letter, one number, and one special character.'
+      );
       return;
     }
 
@@ -33,11 +44,11 @@ export default function RegisterPage() {
     setErrorMsg(null);
 
     try {
-      await register(name, email, password, role);
+      await register(fullName, email, password, role);
       toast.success('Registration successful! Check your email for the 6-digit OTP.');
-      router.push(`/verify-account?email=${encodeURIComponent(email)}`);
-    } catch (err: any) {
-      const msg = err.message || 'Registration failed. Please try again.';
+      router.push(`/verify-account?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Registration failed. Please try again.';
       setErrorMsg(msg);
       toast.error(msg);
     } finally {
@@ -48,7 +59,7 @@ export default function RegisterPage() {
   return (
     <div
       style={{
-        maxWidth: '460px',
+        maxWidth: '480px',
         width: '100%',
         margin: '50px auto 80px',
         padding: '0 20px',
@@ -58,7 +69,7 @@ export default function RegisterPage() {
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
           <h2 style={{ fontSize: '1.8rem', marginBottom: '8px' }}>Create an Account</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Join Zentura Finance with next-gen security
+            Enterprise-grade identity registration for Zentura Finance
           </p>
         </div>
 
@@ -80,23 +91,25 @@ export default function RegisterPage() {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div>
-            <label className="input-label" htmlFor="name-input">
-              Full Name
+            <label className="input-label" htmlFor="fullname-input">
+              Full Legal Name (2–100 chars)
             </label>
             <input
-              id="name-input"
+              id="fullname-input"
               type="text"
               className="input-field"
               placeholder="Alex Vance"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
               required
+              minLength={2}
+              maxLength={100}
             />
           </div>
 
           <div>
             <label className="input-label" htmlFor="email-input">
-              Email Address
+              Corporate / Personal Email
             </label>
             <input
               id="email-input"
@@ -111,24 +124,46 @@ export default function RegisterPage() {
 
           <div>
             <label className="input-label" htmlFor="password-input">
-              Password (min 8 characters)
+              Password (Complexity Policy)
             </label>
-            <input
-              id="password-input"
-              type="password"
-              className="input-field"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={8}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                id="password-input"
+                type={showPassword ? 'text' : 'password'}
+                className="input-field"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                maxLength={128}
+                style={{ paddingRight: '44px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-dim)',
+                  fontSize: '0.8rem',
+                  padding: '4px',
+                }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
+
+            {/* Real-Time Entropy Evaluator */}
+            <PasswordStrengthMeter password={password} />
           </div>
 
           <div>
-            <label className="input-label">Account Role</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {(['CUSTOMER', 'SHOP_OWNER', 'ADMIN'] as const).map((r) => {
+            <label className="input-label">Account Tier / Role</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              {(['CUSTOMER', 'SHOP_OWNER'] as const).map((r) => {
                 const isSelected = role === r;
                 return (
                   <button
@@ -136,7 +171,7 @@ export default function RegisterPage() {
                     type="button"
                     onClick={() => setRole(r)}
                     style={{
-                      padding: '10px 4px',
+                      padding: '12px 8px',
                       borderRadius: '8px',
                       border: isSelected
                         ? '1px solid var(--primary)'
@@ -145,26 +180,29 @@ export default function RegisterPage() {
                         ? 'var(--primary-subtle)'
                         : 'rgba(255, 255, 255, 0.02)',
                       color: isSelected ? 'var(--primary)' : 'var(--text-muted)',
-                      fontSize: '0.75rem',
+                      fontSize: '0.85rem',
                       fontWeight: 600,
                       cursor: 'pointer',
                       transition: 'all var(--transition-fast)',
                     }}
                   >
-                    {r === 'CUSTOMER' ? 'Customer' : r === 'SHOP_OWNER' ? 'Shop Owner' : 'Admin'}
+                    {r === 'CUSTOMER' ? 'Individual (Customer)' : 'Merchant (Shop Owner)'}
                   </button>
                 );
               })}
             </div>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '6px', display: 'block' }}>
+              * System Admin accounts are provisioned out-of-band for security.
+            </span>
           </div>
 
           <button
             type="submit"
             className="btn-primary"
-            disabled={loading}
+            disabled={loading || !evaluatePassword(password).isValid}
             style={{ width: '100%', marginTop: '8px', height: '46px' }}
           >
-            {loading ? <span className="animate-spin">⟳</span> : 'Create Account'}
+            {loading ? <span className="animate-spin">⟳</span> : 'Create Protected Account'}
           </button>
         </form>
 

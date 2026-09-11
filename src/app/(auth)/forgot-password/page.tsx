@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { apiRequest } from '@/lib/api-client';
 import { useToast } from '@/context/ToastContext';
 import { OtpInput } from '@/components/auth/OtpInput';
+import { PasswordStrengthMeter, evaluatePassword } from '@/components/auth/PasswordStrengthMeter';
 import { ResetTokenPayload, ServiceResponse } from '@/lib/types';
 
 export default function ForgotPasswordPage() {
@@ -32,12 +33,12 @@ export default function ForgotPasswordPage() {
     try {
       await apiRequest('/auth/forgot-password', {
         method: 'POST',
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
       toast.success('If an account exists, a reset code was sent.');
       setStep(2);
-    } catch (err: any) {
-      const msg = err.message || 'Failed to send reset code.';
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to send reset code.';
       setErrorMsg(msg);
       toast.error(msg);
     } finally {
@@ -58,7 +59,7 @@ export default function ForgotPasswordPage() {
         '/auth/forget-password-verify-otp',
         {
           method: 'POST',
-          body: JSON.stringify({ email, otp }),
+          body: JSON.stringify({ email: email.trim().toLowerCase(), otp: otp.trim() }),
         }
       );
 
@@ -69,8 +70,8 @@ export default function ForgotPasswordPage() {
       } else {
         throw new Error('No reset token returned.');
       }
-    } catch (err: any) {
-      const msg = err.message || 'Invalid or expired OTP code.';
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid or expired OTP code.';
       setErrorMsg(msg);
       toast.error(msg);
     } finally {
@@ -81,8 +82,11 @@ export default function ForgotPasswordPage() {
   // Step 3: Reset password with reset_token
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 8) {
-      setErrorMsg('Password must be at least 8 characters.');
+    const { isValid } = evaluatePassword(newPassword);
+    if (!isValid) {
+      setErrorMsg(
+        'Password must contain at least 8 characters, with upper & lowercase letters, numbers, and special symbols.'
+      );
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -97,15 +101,15 @@ export default function ForgotPasswordPage() {
       await apiRequest('/auth/reset-password', {
         method: 'POST',
         body: JSON.stringify({
-          reset_token: resetToken,
+          reset_token: resetToken.trim().toLowerCase(),
           newPassword,
         }),
       });
 
       toast.success('Password reset successfully! Please sign in.');
       router.push('/login');
-    } catch (err: any) {
-      const msg = err.message || 'Failed to reset password.';
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to reset password.';
       setErrorMsg(msg);
       toast.error(msg);
     } finally {
@@ -160,7 +164,7 @@ export default function ForgotPasswordPage() {
               ? "Enter your email and we'll send a 6-digit recovery code."
               : step === 2
               ? `Enter the 6-digit code sent to ${email}.`
-              : 'Choose a strong password with at least 8 characters.'}
+              : 'Choose a strong password satisfying the security policy.'}
           </p>
         </div>
 
@@ -235,7 +239,7 @@ export default function ForgotPasswordPage() {
           <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
             <div>
               <label className="input-label" htmlFor="new-password">
-                New Password (min 8 chars)
+                New Password (Complexity Enforced)
               </label>
               <input
                 id="new-password"
@@ -246,7 +250,9 @@ export default function ForgotPasswordPage() {
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
                 minLength={8}
+                maxLength={128}
               />
+              <PasswordStrengthMeter password={newPassword} />
             </div>
             <div>
               <label className="input-label" htmlFor="confirm-password">
@@ -261,12 +267,13 @@ export default function ForgotPasswordPage() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
                 minLength={8}
+                maxLength={128}
               />
             </div>
             <button
               type="submit"
               className="btn-primary"
-              disabled={loading || !newPassword || !confirmPassword}
+              disabled={loading || !evaluatePassword(newPassword).isValid || !confirmPassword}
               style={{ width: '100%', height: '46px' }}
             >
               {loading ? <span className="animate-spin">⟳</span> : 'Update Password & Sign In'}
