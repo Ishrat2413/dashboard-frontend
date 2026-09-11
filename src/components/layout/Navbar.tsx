@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { apiRequest } from '@/lib/api-client';
-import { HealthStatus, ServiceResponse } from '@/lib/types';
+import { HealthStatus } from '@/lib/types';
 
 export function Navbar() {
   const pathname = usePathname();
@@ -117,19 +117,36 @@ export function Navbar() {
             Home
           </Link>
 
+          <Link
+            href="/dashboard"
+            style={{
+              color: pathname.startsWith('/dashboard') ? '#fff' : 'var(--text-muted)',
+              fontSize: '0.9rem',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'color var(--transition-fast)',
+            }}
+          >
+            Dashboard
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                padding: '1px 6px',
+                borderRadius: 'var(--radius-full)',
+              }}
+            >
+              Aug &apos;26
+            </span>
+          </Link>
+
           {isAuthenticated && (
             <>
-              <Link
-                href="/dashboard"
-                style={{
-                  color: pathname.startsWith('/dashboard') ? '#fff' : 'var(--text-muted)',
-                  fontSize: '0.9rem',
-                  fontWeight: 500,
-                  transition: 'color var(--transition-fast)',
-                }}
-              >
-                Dashboard
-              </Link>
               <Link
                 href="/profile"
                 style={{
