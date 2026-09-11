@@ -1,243 +1,433 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
-import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { apiRequest } from '@/lib/api-client';
-import { HealthStatus } from '@/lib/types';
+import { AUGUST_2026_FINANCIAL_REPORT } from '@/data/augustFinanceData';
+import { MonthlyFinancialReport, IncomeRecord, ExpenseRecord } from '@/types/finance';
+import { getReportByMonth } from '@/services/finance.service';
+
+// Financial Components
+import { FinanceHeader } from '@/components/finance/FinanceHeader';
+import { ExecutiveSummaryCards } from '@/components/finance/ExecutiveSummaryCards';
+import { CashflowVisualizer } from '@/components/finance/CashflowVisualizer';
+import { IncomeDetailedBreakdown } from '@/components/finance/IncomeDetailedBreakdown';
+import { ExpenseDetailedBreakdown } from '@/components/finance/ExpenseDetailedBreakdown';
+import { LiabilitiesAndReceivables } from '@/components/finance/LiabilitiesAndReceivables';
+import { VerificationDriveSection } from '@/components/finance/VerificationDriveSection';
+import { FinalSummaryReconciler } from '@/components/finance/FinalSummaryReconciler';
+import { AddTransactionModal } from '@/components/finance/AddTransactionModal';
+import { PrintReportView } from '@/components/finance/PrintReportView';
 
 export default function DashboardPage() {
-  const { user, logout, logoutAll } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const toast = useToast();
-  const [health, setHealth] = useState<HealthStatus | null>(null);
 
-  useEffect(() => {
-    const fetchHealth = async () => {
-      try {
-        const data = (await apiRequest('/health')) as unknown as HealthStatus;
-        setHealth(data);
-      } catch (err) {
-        console.warn('Health fetch error:', err);
-      }
-    };
-    fetchHealth();
+  // State initialized with static data first (instant render), then upgraded
+  // to live API data once the fetch completes.
+  const [report, setReport] = useState<MonthlyFinancialReport>(AUGUST_2026_FINANCIAL_REPORT);
+  const [isModified, setIsModified] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [showAdminTools, setShowAdminTools] = useState(false);
+  const [isLoadingLiveData, setIsLoadingLiveData] = useState(true);
+  const [dataSource, setDataSource] = useState<'live' | 'offline'>('offline');
+
+  // Fetch-and-refresh helper — used on mount and by handleResetReport.
+  const fetchLiveReport = useCallback(() => {
+    setIsLoadingLiveData(true);
+    getReportByMonth(2026, 'August')
+      .then((liveReport) => {
+        setReport(liveReport);
+        setDataSource('live');
+      })
+      .catch(() => {
+        setDataSource('offline');
+      })
+      .finally(() => {
+        setIsLoadingLiveData(false);
+      });
   }, []);
 
-  const handleLogoutAll = async () => {
-    if (confirm('Are you sure you want to log out from all active devices?')) {
-      try {
-        await logoutAll();
-        toast.info('Revoked all active sessions across all devices.');
-      } catch {
-        toast.error('Failed to revoke sessions.');
-      }
+  useEffect(() => {
+    fetchLiveReport();
+  }, [fetchLiveReport]);
+
+  // Recalculate financial report totals dynamically when items change
+  const recalculateReport = (incomeList: IncomeRecord[], expenseList: ExpenseRecord[]) => {
+    const subTotalIncome = incomeList.reduce((acc, curr) => acc + curr.amountBDT, 0);
+    const totalExpenses = expenseList.reduce((acc, curr) => acc + curr.amountBDT, 0);
+    const netBalance = subTotalIncome - totalExpenses;
+
+    // Maintain closing reserve difference or re-derive
+    const closingFund = report.finalSummary.netRemainingFundBalanceBDT + (netBalance - report.executiveSummary.netBalanceBDT);
+
+    setReport((prev) => ({
+      ...prev,
+      incomeItems: incomeList,
+      subTotalIncomeBDT: subTotalIncome,
+      expenseItems: expenseList,
+      totalExpensesBDT: totalExpenses,
+      executiveSummary: {
+        totalIncomeBDT: subTotalIncome,
+        totalExpensesBDT: totalExpenses,
+        netBalanceBDT: netBalance,
+      },
+      finalSummary: {
+        ...prev.finalSummary,
+        netRemainingFundBalanceBDT: closingFund,
+      },
+    }));
+    setIsModified(true);
+  };
+
+  const handleAddIncome = (newItem: IncomeRecord) => {
+    const updated = [newItem, ...report.incomeItems];
+    recalculateReport(updated, report.expenseItems);
+    toast.success(`Inflow added: ${newItem.source}`);
+  };
+
+  const handleAddExpense = (newItem: ExpenseRecord) => {
+    const updated = [newItem, ...report.expenseItems];
+    recalculateReport(report.incomeItems, updated);
+    toast.success(`Expense added: ${newItem.categoryTitle}`);
+  };
+
+  const handleResetReport = () => {
+    // If live data is available, restore from live API; otherwise static fallback
+    if (dataSource === 'live') {
+      void fetchLiveReport();
+      toast.info('Refreshing from live API...');
+    } else {
+      setReport(AUGUST_2026_FINANCIAL_REPORT);
+      setIsModified(false);
+      toast.info('Restored original audited August 2026 ledger.');
     }
+    setIsModified(false);
+  };
+
+  const handlePrint = () => {
+    window.print();
   };
 
   return (
-    <ProtectedRoute>
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 24px 80px', width: '100%' }}>
-        {/* Top Header Card */}
-        <div
-          className="glass-panel-glow"
-          style={{
-            padding: '36px',
-            marginBottom: '32px',
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '24px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <div
-              style={{
-                width: '64px',
-                height: '64px',
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #10b981 0%, #06b6d4 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1.8rem',
-                fontWeight: 700,
-                color: '#07090e',
-                overflow: 'hidden',
-                boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)',
-              }}
-            >
-              {user?.avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.avatar}
-                  alt={user.name}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : (
-                user?.name?.charAt(0).toUpperCase() || 'U'
-              )}
-            </div>
+    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '32px 24px 80px', width: '100%' }}>
+      {/* Print View Component (Invisible on screen, styled for paper/PDF) */}
+      <PrintReportView report={report} />
 
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <h1 style={{ fontSize: '1.8rem' }}>Welcome, {user?.name}</h1>
-                <span
-                  className={
-                    user?.role === 'ADMIN'
-                      ? 'badge badge-admin'
-                      : user?.role === 'SHOP_OWNER'
-                      ? 'badge badge-shopowner'
-                      : 'badge badge-customer'
-                  }
-                >
+      {/* Screen Interactive Container */}
+      <div className="interactive-ui">
+        {/* Data source indicator — live API or static fallback */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+          <span
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 600,
+              letterSpacing: '0.05em',
+              padding: '3px 10px',
+              borderRadius: '999px',
+              background: isLoadingLiveData
+                ? 'rgba(99, 102, 241, 0.12)'
+                : dataSource === 'live'
+                  ? 'rgba(16, 185, 129, 0.12)'
+                  : 'rgba(251, 191, 36, 0.12)',
+              color: isLoadingLiveData
+                ? '#818cf8'
+                : dataSource === 'live'
+                  ? '#10b981'
+                  : '#f59e0b',
+              border: `1px solid ${isLoadingLiveData ? 'rgba(99,102,241,0.2)' : dataSource === 'live' ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}`,
+            }}
+          >
+            {isLoadingLiveData ? '⟳ Fetching live data…' : dataSource === 'live' ? '● Live API' : '◎ Offline mode'}
+          </span>
+        </div>
+
+        {/* Guest Auditor Notice Banner (if unauthenticated) */}
+        {!isAuthenticated && (
+          <div
+            style={{
+              padding: '12px 20px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(6, 182, 212, 0.08)',
+              border: '1px solid rgba(6, 182, 212, 0.25)',
+              marginBottom: '20px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '1.2rem' }}>🌐</span>
+              <span style={{ fontSize: '0.88rem', color: 'var(--text-main)' }}>
+                <strong>Auditor Access Mode:</strong> You are reviewing the live verified August 2026 Financial
+                Performance Report for <strong>Zentura Finance</strong>.
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Link
+                href="/login"
+                className="btn-secondary"
+                style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+              >
+                Sign In to Platform →
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* Authenticated User Session Strip (if authenticated) */}
+        {isAuthenticated && (
+          <div
+            style={{
+              padding: '10px 18px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+              marginBottom: '20px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '1rem' }}>👤</span>
+              <span style={{ fontSize: '0.86rem', color: 'var(--text-main)' }}>
+                Active Session: <strong>{user?.name}</strong> ({user?.email}) • Role:{' '}
+                <span className={user?.role === 'ADMIN' ? 'badge badge-admin' : 'badge badge-customer'}>
                   {user?.role}
                 </span>
-                {user?.acc_verified && (
-                  <span className="badge badge-success" title="Account email verified">
-                    ✓ Verified
-                  </span>
-                )}
-              </div>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', marginTop: '4px' }}>
-                {user?.email} • ID: <span style={{ fontFamily: 'monospace', color: 'var(--text-dim)' }}>{user?.id ? user.id.substring(0, 8) + '...' : 'Live'}</span>
-              </p>
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              {user?.role === 'ADMIN' && (
+                <button
+                  onClick={() => setShowAdminTools(!showAdminTools)}
+                  style={{
+                    fontSize: '0.8rem',
+                    color: '#fb7185',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    background: 'rgba(244, 63, 94, 0.1)',
+                  }}
+                >
+                  {showAdminTools ? 'Hide Admin Bar' : 'Admin Bar'}
+                </button>
+              )}
+              <Link
+                href="/profile"
+                style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}
+              >
+                Profile Settings
+              </Link>
+              <button
+                onClick={() => logout()}
+                style={{ fontSize: '0.82rem', color: '#fb7185' }}
+              >
+                Sign Out
+              </button>
             </div>
           </div>
+        )}
 
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <Link href="/profile" className="btn-secondary" style={{ padding: '10px 18px', fontSize: '0.9rem' }}>
-              ⚙️ Account Settings
-            </Link>
-            <button
-              onClick={handleLogoutAll}
-              style={{
-                padding: '10px 16px',
-                borderRadius: 'var(--radius-md)',
-                background: 'rgba(244, 63, 94, 0.12)',
-                border: '1px solid rgba(244, 63, 94, 0.3)',
-                color: '#fb7185',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Revoke All Devices
-            </button>
-          </div>
-        </div>
-
-        {/* Metrics Grid */}
+        {/* Section Jump Bar */}
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-            gap: '20px',
-            marginBottom: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            overflowX: 'auto',
+            paddingBottom: '8px',
+            marginBottom: '20px',
           }}
         >
-          {/* Card 1 */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Security Protocol
-            </span>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, marginTop: '8px', color: '#34d399' }}>
-              Redis-Backed Token
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Opaque Bearer key with server-side revocation
-            </p>
-          </div>
-
-          {/* Card 2 */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Rate Limiting
-            </span>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, marginTop: '8px', color: '#38bdf8' }}>
-              Lua Sliding Window
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              IP + Device + Identity dual-layer throttle
-            </p>
-          </div>
-
-          {/* Card 3 */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Backend Liveness
-            </span>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, marginTop: '8px', color: health?.status === 'ok' ? '#10b981' : '#f43f5e' }}>
-              {health?.status === 'ok' ? 'Healthy (Uptime ' + Math.round(health.uptime) + 's)' : 'Checking...'}
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Node.js Fastify process pinged
-            </p>
-          </div>
-
-          {/* Card 4 */}
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Cache Status
-            </span>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, marginTop: '8px', color: '#c084fc' }}>
-              L1 + Bloom + L2
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Zero DB load on invalid user queries
-            </p>
-          </div>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
+            Jump to:
+          </span>
+          <a
+            href="#executive-summary"
+            style={{
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            1. Executive Summary
+          </a>
+          <a
+            href="#cashflow-visualizer"
+            style={{
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Proportional Charts
+          </a>
+          <a
+            href="#income-breakdown"
+            style={{
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            2. Income Breakdown
+          </a>
+          <a
+            href="#expense-breakdown"
+            style={{
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            3. Expense Breakdown
+          </a>
+          <a
+            href="#liabilities-receivables"
+            style={{
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            4. Liabilities &amp; Receivables
+          </a>
+          <a
+            href="#verification"
+            style={{
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            5. Verification Drive
+          </a>
+          <a
+            href="#final-summary"
+            style={{
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            6. Final Reconciliation
+          </a>
         </div>
 
-        {/* Role-Specific Dashboard Content */}
-        {user?.role === 'ADMIN' && (
+        {/* Top Header Card */}
+        <FinanceHeader
+          report={report}
+          onOpenAddModal={() => setIsAddModalOpen(true)}
+          onPrintReport={handlePrint}
+          isModified={isModified}
+          onResetReport={handleResetReport}
+          userName={user?.name}
+          userRole={user?.role}
+        />
+
+        {/* 1. Executive Summary Cards */}
+        <div id="executive-summary">
+          <ExecutiveSummaryCards report={report} />
+        </div>
+
+        {/* Proportional Cashflow Visualizer */}
+        <div id="cashflow-visualizer">
+          <CashflowVisualizer report={report} />
+        </div>
+
+        {/* 2. Income Detailed Breakdown */}
+        <IncomeDetailedBreakdown
+          items={report.incomeItems}
+          subTotalBDT={report.subTotalIncomeBDT}
+        />
+
+        {/* 3. Expense Detailed Breakdown */}
+        <ExpenseDetailedBreakdown
+          items={report.expenseItems}
+          totalExpensesBDT={report.totalExpensesBDT}
+        />
+
+        {/* 4. Outstanding Liabilities & Receivables */}
+        <LiabilitiesAndReceivables
+          liabilities={report.outstandingLiabilities}
+          receivables={report.outstandingReceivables}
+          totalLiabilitiesBDT={report.totalLiabilitiesBDT}
+          totalReceivablesBDT={report.totalReceivablesBDT}
+        />
+
+        {/* 5. Verification Drive Repository */}
+        <VerificationDriveSection driveUrl={report.driveVerificationUrl} />
+
+        {/* 6. Final Summary & Waterfall Reconciliation */}
+        <FinalSummaryReconciler report={report} />
+
+        {/* Admin Tools Drawer (if Admin & Toggled) */}
+        {user?.role === 'ADMIN' && showAdminTools && (
           <div
             className="glass-panel"
             style={{
-              padding: '32px',
+              padding: '24px',
               marginBottom: '32px',
               borderLeft: '4px solid #fb7185',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div>
-                <h3 style={{ fontSize: '1.4rem' }}>Admin Control Center</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                  Manage transactional BullMQ email pipelines and inspect system telemetry.
-                </p>
-              </div>
-              <Link href="/admin/email-test" className="btn-primary" style={{ padding: '8px 18px', fontSize: '0.9rem' }}>
+            <h3 style={{ fontSize: '1.1rem', marginBottom: '8px' }}>Admin Infrastructure Console</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginBottom: '14px' }}>
+              Inspect transactional Fastify / BullMQ queues, Swagger API contracts, and Prometheus metrics.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <Link href="/admin/email-test" className="btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
                 Open Email Test Console →
               </Link>
-            </div>
-            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '16px' }}>
               <a
                 href="http://localhost:8080/api-doc"
                 target="_blank"
                 rel="noreferrer"
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  background: 'rgba(255,255,255,0.05)',
-                  fontSize: '0.85rem',
-                  color: 'var(--text-main)',
-                }}
+                className="btn-secondary"
+                style={{ padding: '8px 14px', fontSize: '0.85rem' }}
               >
-                Swagger UI ↗
+                Swagger API UI ↗
               </a>
               <a
                 href="http://localhost:8080/metrics"
                 target="_blank"
                 rel="noreferrer"
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  background: 'rgba(255,255,255,0.05)',
-                  fontSize: '0.85rem',
-                  color: 'var(--text-main)',
-                }}
+                className="btn-secondary"
+                style={{ padding: '8px 14px', fontSize: '0.85rem' }}
               >
                 Prometheus Metrics ↗
               </a>
@@ -245,42 +435,14 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Quick Links & Shortcuts */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '1.1rem', marginBottom: '8px' }}>👤 Profile Management</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>
-              Update your display name, upload a high-resolution avatar to GCP Cloud Storage, or manage your account info.
-            </p>
-            <Link href="/profile" style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '0.9rem' }}>
-              Manage Profile →
-            </Link>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '1.1rem', marginBottom: '8px' }}>🔐 Credentials &amp; Security</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>
-              Change your password or initiate an email address switch verified by a 6-digit OTP.
-            </p>
-            <Link href="/profile#security" style={{ color: 'var(--accent-cyan)', fontWeight: 600, fontSize: '0.9rem' }}>
-              Security Settings →
-            </Link>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '1.1rem', marginBottom: '8px' }}>🚪 Session Termination</h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>
-              End your current browsing session or revoke authentication tokens across all active mobile and web clients.
-            </p>
-            <button
-              onClick={() => logout()}
-              style={{ color: '#fb7185', fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer' }}
-            >
-              Sign Out of Session →
-            </button>
-          </div>
-        </div>
+        {/* Add Entry Modal */}
+        <AddTransactionModal
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          onAddIncome={handleAddIncome}
+          onAddExpense={handleAddExpense}
+        />
       </div>
-    </ProtectedRoute>
+    </div>
   );
 }
